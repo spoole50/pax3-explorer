@@ -120,6 +120,36 @@ input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: va
 #dev .chip { color: var(--ink); font-size: 13px; }
 #log { white-space: pre-wrap; word-break: break-all; font: 11px/1.45 ui-monospace, monospace; max-height: 280px; overflow: auto; background: var(--line); border-radius: 12px; padding: 8px 10px; margin-top: 12px; }
 #log:empty::before { content: "No messages yet"; color: var(--muted); }
+
+/* Session stats */
+.stats { display: flex; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.stat { flex: 1; text-align: center; }
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 12px; color: var(--muted); }
+.stat.live b { color: var(--accent); }
+
+/* Presets: long-press to save */
+#presets .chip { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+#presets .chip.saving { animation: saving .55s linear forwards; }
+@keyframes saving { to { transform: scale(.9); box-shadow: inset 0 0 0 2px var(--accent); } }
+.chips + .hint { text-align: center; margin-top: 10px; }
+
+.toast { position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translate(-50%, 20px); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 99px; font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; white-space: nowrap; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* Attribute explorer */
+.section { font-size: 13px; font-weight: 600; color: var(--muted); margin: 18px 0 6px; }
+#attrs { width: 100%; border-collapse: collapse; font: 11px/1.4 ui-monospace, monospace; }
+#attrs td { padding: 5px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+#attrs td:first-child { width: 2.5em; color: var(--muted); }
+#attrs td:nth-child(2) { font-family: -apple-system, system-ui, sans-serif; font-size: 12px; }
+#attrs td:nth-child(3) { word-break: break-all; }
+#attrs td:last-child { text-align: right; white-space: nowrap; color: var(--muted); }
+#attrs tr.changed td { background: rgba(255, 138, 101, .22); transition: none; }
+#attrs tr td { transition: background 1.5s; }
+#attrs .guess { color: var(--muted); }
+#attrs:empty::after { content: "Connect to see attributes"; display: block; color: var(--muted); padding: 6px 0; font-family: -apple-system, system-ui, sans-serif; }
 </style>
 </head>
 <body>
@@ -146,17 +176,23 @@ input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: va
       </div>
     </div>
     <div class="state" id="state" aria-live="polite">Not connected</div>
+    <div class="stats">
+      <div class="stat" id="sessStat"><b id="sess">–</b><span id="sessLbl">Session</span></div>
+      <div class="stat"><b id="heat">–</b><span>Heat-up</span></div>
+      <div class="stat"><b id="draws">–</b><span>Draws</span></div>
+    </div>
   </div>
 
   <div class="card controls">
     <div class="row label"><span>Temperature</span><b><span id="setv">380</span>°F</b></div>
     <input type="range" id="temp" min="341" max="420" value="380" aria-label="Temperature">
     <div class="chips" id="presets">
-      <button class="chip" data-t="360"><b>360°</b>Flavor</button>
-      <button class="chip" data-t="380"><b>380°</b>Balanced</button>
-      <button class="chip" data-t="400"><b>400°</b>Cloudy</button>
-      <button class="chip" data-t="420"><b>420°</b>Max</button>
+      <button class="chip"><b></b>Flavor</button>
+      <button class="chip"><b></b>Balanced</button>
+      <button class="chip"><b></b>Cloudy</button>
+      <button class="chip"><b></b>Max</button>
     </div>
+    <span class="hint">Press and hold a preset to save the current temp</span>
   </div>
 
   <div class="card controls">
@@ -180,12 +216,26 @@ input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: va
       <span>Serial<span class="hint">8 characters, on the device</span></span>
       <input type="text" id="serial" maxlength="8" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false">
     </div>
+    <div class="section">Attributes</div>
+    <label class="row">
+      <span>Live poll<span class="hint">Re-request everything every 2 s. Move the device and watch which row lights up.</span></span>
+      <span class="switch"><input type="checkbox" id="poll"><span></span></span>
+    </label>
     <div class="chips">
       <button class="chip" id="status">Request status</button>
+      <button class="chip" id="scan">Request IDs 1–40</button>
+    </div>
+    <table id="attrs"></table>
+
+    <div class="section">Log</div>
+    <div class="chips">
+      <button class="chip" id="resetPresets">Reset presets</button>
       <button class="chip" id="clear">Clear log</button>
     </div>
     <div id="log"></div>
   </div>
+
+  <div class="toast" id="toast" role="status"></div>
 
 </div>
 <script>
@@ -208,6 +258,16 @@ const STATES = {
   5: ['Oven off', 'cool'],
   6: ['Setting temp', 'heat'],
 };
+// Known attribute IDs; `true` marks a name that's a guess, not yet confirmed on a PAX 3.
+const ATTRS = {
+  1: ['Live temp'], 2: ['Set point'], 3: ['Battery'], 4: ['Usage', true], 6: ['Locked'],
+  7: ['Charge status'], 8: ['Pod inserted', true], 9: ['Time', true], 17: ['Heater ranges', true],
+  19: ['Dynamic mode'], 20: ['Color theme', true], 21: ['Brightness'], 23: ['Haptic mode', true],
+  25: ['Heating params'], 27: ['UI mode', true], 28: ['Shell color', true],
+  31: ['Active target'], 32: ['Heating state'],
+};
+const DEFAULT_PRESETS = [360, 380, 400, 420];
+const fmtTime = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
 const $ = id => document.getElementById(id);
 const store = {
@@ -218,8 +278,13 @@ const store = {
 let keyObj, device, rd, wr;
 let chain = Promise.resolve();
 let want = false, retries = 0, dragging = false;
-let live = null, target = null;
+let live = null, target = null, heatState = null, battery = null, charging = false;
+let presets = loadPresets();
+let pollTimer = null, attrsQueued = false;
 const lines = [];
+const attrs = {}; // id -> { hex, at, changedAt }
+// Session = from first reaching Ready until the device sleeps or turns off.
+const session = { heatStart: null, readyAt: null, heatSecs: null, draws: 0, lastMs: null };
 
 // ---- Helpers ----
 function hex(s) { return new Uint8Array(s.match(/../g).map(h => parseInt(h, 16))); }
@@ -308,21 +373,123 @@ function showSetTemp(f) {
 function showDev() {
   $('dev').hidden = !$('devmode').checked;
   renderLog();
+  renderAttrs();
+  syncPoll();
+}
+let toastTimer;
+function toast(msg) {
+  $('toast').textContent = msg;
+  $('toast').classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('toast').classList.remove('show'), 1800);
+}
+function renderBattery() {
+  $('batt').textContent = (charging ? '⚡ ' : '🔋 ') + (battery ?? '–') + (battery == null ? '' : '%');
+}
+
+// ---- Session tracking ----
+function trackState(s) {
+  const now = Date.now(), prev = heatState;
+  heatState = s;
+  if ((s === 0 || s === 6) && !session.heatStart && !session.readyAt) session.heatStart = now;
+  if ((s === 1 || s === 2) && !session.readyAt) {
+    session.readyAt = now;
+    session.draws = 0;
+    session.heatSecs = session.heatStart ? Math.round((now - session.heatStart) / 1000) : null;
+  }
+  if (s === 2 && prev !== 2 && session.readyAt) session.draws++;
+  if (s === 4 || s === 5) endSession();
+  renderStats();
+}
+function endSession() {
+  if (session.readyAt) session.lastMs = Date.now() - session.readyAt;
+  session.readyAt = session.heatStart = null;
+}
+function renderStats() {
+  const active = !!session.readyAt;
+  $('sess').textContent = active ? fmtTime(Date.now() - session.readyAt) : session.lastMs ? fmtTime(session.lastMs) : '–';
+  $('sessLbl').textContent = active || !session.lastMs ? 'Session' : 'Last session';
+  $('sessStat').classList.toggle('live', active);
+  $('heat').textContent = session.heatSecs != null ? session.heatSecs + 's' : '–';
+  $('draws').textContent = session.readyAt || session.lastMs ? session.draws : '–';
+}
+setInterval(() => { if (session.readyAt) renderStats(); }, 1000);
+
+// ---- Presets (press and hold to save) ----
+function loadPresets() {
+  try {
+    const p = JSON.parse(store.get('paxPresets'));
+    if (Array.isArray(p) && p.length === 4 && p.every(Number.isFinite)) return p;
+  } catch {}
+  return [...DEFAULT_PRESETS];
+}
+function renderPresets() {
+  document.querySelectorAll('#presets .chip').forEach((c, i) => {
+    c.dataset.t = presets[i];
+    c.querySelector('b').textContent = presets[i] + '°';
+  });
+  showSetTemp($('temp').value);
+}
+function savePreset(i) {
+  presets[i] = +$('temp').value;
+  store.set('paxPresets', JSON.stringify(presets));
+  renderPresets();
+  const name = document.querySelectorAll('#presets .chip')[i].lastChild.textContent;
+  toast(`Saved ${presets[i]}° to ${name}`);
+}
+function wirePreset(chip, i) {
+  let timer = null, held = false;
+  const cancel = () => { clearTimeout(timer); chip.classList.remove('saving'); };
+  chip.addEventListener('pointerdown', () => {
+    held = false;
+    chip.classList.add('saving');
+    timer = setTimeout(() => { held = true; chip.classList.remove('saving'); savePreset(i); }, 550);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => chip.addEventListener(ev, cancel));
+  chip.addEventListener('contextmenu', e => e.preventDefault());
+  chip.addEventListener('click', () => { if (held) { held = false; return; } setTemp(presets[i]); });
+}
+
+// ---- Attribute explorer ----
+function recordAttr(id, pt) {
+  const hex = toHex(pt.slice(1, 9)), a = attrs[id], now = Date.now();
+  attrs[id] = { hex, at: now, changedAt: !a || a.hex !== hex ? now : a.changedAt };
+  if (!attrsQueued && !$('dev').hidden) { attrsQueued = true; requestAnimationFrame(renderAttrs); }
+}
+function renderAttrs() {
+  attrsQueued = false;
+  if ($('dev').hidden) return;
+  const now = Date.now();
+  $('attrs').innerHTML = Object.keys(attrs).map(Number).sort((a, b) => a - b).map(id => {
+    const a = attrs[id], [name, guess] = ATTRS[id] || ['Unknown', true];
+    const age = Math.round((now - a.at) / 1000);
+    return `<tr class="${now - a.changedAt < 1500 ? 'changed' : ''}"><td>${id}</td>` +
+      `<td class="${guess ? 'guess' : ''}">${name}${guess ? '?' : ''}</td><td>${a.hex}</td><td>${age}s</td></tr>`;
+  }).join('');
+}
+setInterval(renderAttrs, 1000);
+function syncPoll() {
+  const on = $('poll').checked && !$('dev').hidden;
+  if (on && !pollTimer) pollTimer = setInterval(() => send(254, u64(BITS)), 2000);
+  if (!on && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
 // ---- Device I/O ----
 function handle(pt) {
   const id = pt[0], dv = new DataView(pt.buffer, pt.byteOffset), u16 = () => dv.getUint16(1, true);
+  recordAttr(id, pt);
   if (id === 1) { live = rawToF(u16()); drawRing(); return; }
-  log(`← ${id} [${toHex(pt.slice(1, 9))}]`);
+  if (!pollTimer || attrs[id].changedAt === attrs[id].at) log(`← ${id} [${toHex(pt.slice(1, 9))}]`);
   if (id === 2 && !dragging) showSetTemp(rawToF(u16()));
   if (id === 31) { target = rawToF(u16()); drawRing(); }
-  if (id === 3) $('batt').textContent = '🔋 ' + pt[1] + '%';
+  if (id === 3) { battery = pt[1]; renderBattery(); }
+  if (id === 7) { charging = pt[1] !== 0; renderBattery(); } // assumes 0 = not charging
   if (id === 21 && pt[1] >= 5) $('bright').value = Math.round((pt[1] - 5) * 100 / 123);
   if (id === 32) {
     const [text, cls] = STATES[pt[1]] || ['State ' + pt[1], 'cool'];
     setState(text);
     $('ring').className = 'ring ' + cls;
+    trackState(pt[1]);
   }
 }
 function onNotify() {
@@ -404,6 +571,8 @@ function onDisc() {
     setTimeout(() => connect().catch(e => { log('Retry failed: ' + e); onDisc(); }), 800 * retries);
   } else {
     $('ring').className = 'ring';
+    endSession();
+    renderStats();
     setConn('Offline');
     setState(want ? 'Lost connection — tap Connect' : 'Not connected');
     want = false;
@@ -422,17 +591,20 @@ $('connect').onclick = () => {
 };
 $('temp').oninput = e => { dragging = true; showSetTemp(e.target.value); };
 $('temp').onchange = e => { dragging = false; setTemp(+e.target.value); };
-document.querySelectorAll('#presets .chip').forEach(b => b.onclick = () => setTemp(+b.dataset.t));
+document.querySelectorAll('#presets .chip').forEach(wirePreset);
 $('bright').onchange = e => send(21, [Math.round(5 + e.target.value * 123 / 100), 0]);
 $('hold').checked = store.get('paxHold') !== '0';
 $('hold').onchange = () => { store.set('paxHold', $('hold').checked ? '1' : '0'); applyMode(); };
 $('devmode').onchange = showDev;
 $('status').onclick = () => send(254, u64(BITS));
+$('scan').onclick = () => send(254, u64(Array.from({ length: 40 }, (_, i) => i + 1)));
+$('poll').onchange = syncPoll;
+$('resetPresets').onclick = () => { presets = [...DEFAULT_PRESETS]; store.set('paxPresets', ''); renderPresets(); toast('Presets reset'); };
 $('clear').onclick = () => { lines.length = 0; renderLog(); };
 $('serial').value = store.get('paxSerial') || SERIAL;
 $('serial').oninput = e => store.set('paxSerial', e.target.value.trim().toUpperCase());
 
-showSetTemp($('temp').value);
+renderPresets();
 if (!navigator.bluetooth) {
   $('state').textContent = 'No Bluetooth here — on iPhone, use the Bluefy browser';
   $('connect').disabled = true;
