@@ -230,11 +230,13 @@ input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: va
 
     <div class="section">Log</div>
     <div class="chips">
-      <button class="chip" id="resetPresets">Reset presets</button>
-      <button class="chip" id="clear">Clear log</button>
+      <button class="chip" id="mark">Mark</button>
+      <button class="chip" id="pause">Pause</button>
+      <button class="chip" id="clear">Clear</button>
       <button class="chip" id="copy">Copy all</button>
     </div>
     <div id="log"></div>
+    <div class="chips"><button class="chip" id="resetPresets">Reset presets</button></div>
   </div>
 
   <div class="toast" id="toast" role="status"></div>
@@ -263,7 +265,7 @@ const STATES = {
 // Known attribute IDs; `true` marks a name that's a guess, not yet confirmed on a PAX 3.
 const ATTRS = {
   1: ['Live temp'], 2: ['Set point'], 3: ['Battery'], 4: ['Usage', true], 6: ['Locked'],
-  7: ['Charge status'], 8: ['Pod inserted', true], 9: ['Time', true], 17: ['Temp levels'],
+  7: ['Charge status'], 8: ['Pod inserted', true], 9: ['Uptime'], 17: ['Temp levels'],
   19: ['Dynamic mode'], 20: ['Color theme', true], 21: ['Brightness'], 23: ['Haptic mode', true],
   24: ['Supported attributes'], 25: ['Heating params'], 27: ['UI mode', true], 28: ['Shell color', true],
   30: ['Low battery mode', true], 31: ['Active target'], 32: ['Heating state'],
@@ -284,6 +286,7 @@ let live = null, target = null, heatState = null, battery = null, charging = fal
 let presets = loadPresets();
 let pollTimer = null, attrsQueued = false;
 const lines = [];
+let logPaused = false, marks = 0;
 const attrs = {}; // id -> { hex, at, changedAt }
 // Session = from first reaching Ready until the device sleeps or turns off.
 const session = { heatStart: null, readyAt: null, heatSecs: null, draws: 0, lastMs: null };
@@ -297,9 +300,10 @@ function renderLog() {
   $('log').textContent = lines.join('\n');
   $('log').scrollTop = 1e9;
 }
-function log(m) {
+function log(m, force) {
+  if (logPaused && !force) return;
   lines.push(new Date().toLocaleTimeString() + '  ' + m);
-  if (lines.length > 300) lines.shift();
+  if (lines.length > 1000) lines.shift();
   renderLog();
 }
 
@@ -455,11 +459,16 @@ function wirePreset(chip, i) {
 // ---- Attribute explorer ----
 // Messages are padded with random bytes. Bytes that change on most messages are
 // treated as padding; only the remaining "signal" bytes count as a real change.
-function isNoise(a, i) { return a.cmp >= 2 && a.flips[i] / a.cmp > 0.6; }
+const TICKING = new Set([1, 9]); // change on their own; never counted as a change
+const LEN = { 1: 2, 2: 2, 3: 1, 6: 1, 7: 1, 9: 4, 17: 8, 19: 1, 21: 1, 23: 6, 24: 8, 31: 2, 32: 1 };
+function isNoise(a, i) {
+  if (LEN[a.id] != null) return i >= LEN[a.id];
+  return a.cmp >= 2 && a.flips[i] / a.cmp > 0.6;
+}
 function recordAttr(id, pt) {
   const bytes = [...pt.slice(1)], now = Date.now();
   let a = attrs[id];
-  if (!a) a = attrs[id] = { bytes, cmp: 0, flips: bytes.map(() => 0), at: now, changedAt: now };
+  if (!a) a = attrs[id] = { id, bytes, cmp: 0, flips: bytes.map(() => 0), at: now, changedAt: now };
   else {
     let changed = false;
     a.cmp++;
@@ -470,7 +479,7 @@ function recordAttr(id, pt) {
     });
     a.bytes = bytes;
     a.at = now;
-    if (changed && a.cmp >= 3) a.changedAt = now; // need a few samples to tell padding from data
+    if (changed && a.cmp >= 3 && !TICKING.has(id)) a.changedAt = now; // need a few samples to tell padding from data
   }
   if (!attrsQueued && !$('dev').hidden) { attrsQueued = true; requestAnimationFrame(renderAttrs); }
 }
@@ -478,6 +487,7 @@ function decodeAttr(id, b) {
   const u16 = i => b[i] | b[i + 1] << 8;
   if (id === 1 || id === 2 || id === 31) return `${rawToF(u16(0))}°F`;
   if (id === 3) return `${b[0]}%`;
+  if (id === 9) { const t = b[0] | b[1] << 8 | b[2] << 16 | b[3] << 24; return `${Math.floor(t / 3600)}h ${Math.floor(t / 60) % 60}m ${t % 60}s`; }
   if (id === 17) return [0, 2, 4, 6].map(i => rawToF(u16(i)) + '°').join(' ');
   if (id === 24) {
     const ids = [];
@@ -519,7 +529,7 @@ async function copyResults() {
 setInterval(renderAttrs, 1000);
 function syncPoll() {
   const on = $('poll').checked && !$('dev').hidden;
-  if (on && !pollTimer) pollTimer = setInterval(() => send(254, u64(BITS)), 2000);
+  if (on && !pollTimer) pollTimer = setInterval(() => send(254, u64(BITS), true), 2000);
   if (!on && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
@@ -553,7 +563,7 @@ function writePkt(p) {
   if (wr.writeValueWithResponse) return wr.writeValueWithResponse(p);
   return wr.writeValue(p);
 }
-function send(id, payload = []) {
+function send(id, payload = [], quiet = false) {
   enqueue(async () => {
     if (!wr) return;
     const len = Math.ceil((1 + payload.length) / 16) * 16;
@@ -564,7 +574,7 @@ function send(id, payload = []) {
     const pkt = new Uint8Array(len + 16);
     pkt.set(await ofb(pt, iv));
     pkt.set(iv, len);
-    try { await writePkt(pkt); log(`→ ${id} [${toHex(payload)}] ok`); }
+    try { await writePkt(pkt); if (!quiet) log(`→ ${id} [${toHex(payload)}] ok`); }
     catch (e) { log(`→ ${id} FAILED ${e}`); }
   });
 }
@@ -650,7 +660,13 @@ $('scan').onclick = () => send(254, u64(Array.from({ length: 40 }, (_, i) => i +
 $('poll').onchange = syncPoll;
 $('resetPresets').onclick = () => { presets = [...DEFAULT_PRESETS]; store.set('paxPresets', ''); renderPresets(); toast('Presets reset'); };
 $('copy').onclick = copyResults;
-$('clear').onclick = () => { lines.length = 0; renderLog(); };
+$('mark').onclick = () => log(`──────── ${++marks} ────────`, true);
+$('pause').onclick = () => {
+  logPaused = !logPaused;
+  $('pause').textContent = logPaused ? 'Resume' : 'Pause';
+  $('pause').classList.toggle('active', logPaused);
+};
+$('clear').onclick = () => { lines.length = 0; marks = 0; renderLog(); };
 $('serial').value = store.get('paxSerial') || SERIAL;
 $('serial').oninput = e => store.set('paxSerial', e.target.value.trim().toUpperCase());
 
