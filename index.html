@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#fff6ef" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1d1716" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Ember · PAX 3 remote</title>
+<style>
+:root {
+  --bg: #fff6ef;
+  --card: #fff;
+  --ink: #3b2a2a;
+  --muted: #9a8580;
+  --line: #f3e6dd;
+  --accent: #ff8a65;
+  --accent-ink: #fff;
+  --ok: #3fae86;
+  --ok-bg: #d9f5ea;
+  --ok-ink: #1f7a57;
+  --cool: #8fa6cf;
+  --shadow: 0 6px 22px rgba(120, 60, 40, .08);
+  --arc: var(--accent);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d1716;
+    --card: #2a2120;
+    --ink: #f6e9e3;
+    --muted: #b09a93;
+    --line: #3a2f2d;
+    --ok-bg: #1d3a30;
+    --ok-ink: #7fdcb6;
+    --shadow: 0 6px 22px rgba(0, 0, 0, .3);
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.35 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.wrap { max-width: 420px; margin: 0 auto; }
+
+/* Header */
+header { display: flex; justify-content: space-between; align-items: center; margin: 4px 2px 16px; }
+h1 { font-size: 26px; margin: 0; letter-spacing: -.02em; }
+.pills { display: flex; gap: 6px; }
+.pill { font-size: 13px; padding: 5px 11px; border-radius: 99px; background: var(--line); color: var(--muted); white-space: nowrap; transition: background .2s, color .2s; }
+.pill.on { background: var(--ok-bg); color: var(--ok-ink); }
+
+/* Cards */
+.card { background: var(--card); border-radius: 26px; padding: 20px; margin-bottom: 14px; box-shadow: var(--shadow); }
+.controls { transition: opacity .3s; }
+body:not(.connected) .controls { opacity: .45; pointer-events: none; }
+
+/* Temperature ring */
+.ring { position: relative; width: 220px; height: 220px; margin: 4px auto 0; transition: opacity .6s; }
+.ring svg { display: block; transform: rotate(-90deg); }
+.ring .track { stroke: var(--line); }
+.ring .arc { stroke: var(--arc); transition: stroke-dashoffset .6s, stroke .3s; }
+.ring .c { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.big { font-size: 58px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; transition: color .6s; }
+.big small { font-size: 24px; font-weight: 600; vertical-align: top; margin-left: 2px; }
+.sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+.state { text-align: center; margin-top: 12px; font-weight: 600; min-height: 1.35em; transition: opacity .15s; }
+
+.ring.heat { --arc: var(--accent); }
+.ring.heat svg { animation: glow 1.4s ease-in-out infinite; }
+.ring.heat .big { animation: breathe 1.4s ease-in-out infinite; }
+.ring.ok { --arc: #5cc8a1; animation: pop .5s ease-out; }
+.ring.ok svg { filter: drop-shadow(0 0 10px rgba(92, 200, 161, .55)); }
+.ring.ok .big { color: var(--ok); }
+.ring.cool { --arc: #9fb4d9; opacity: .7; }
+.ring.cool .big { color: var(--cool); }
+@keyframes glow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(255, 138, 101, 0)); } 50% { filter: drop-shadow(0 0 14px rgba(255, 138, 101, .7)); } }
+@keyframes breathe { 50% { transform: scale(1.05); } }
+@keyframes pop { 40% { transform: scale(1.08); } }
+@media (prefers-reduced-motion: reduce) { .ring, .ring * { animation: none !important; } }
+
+/* Rows & inputs */
+.row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.row + .row, .row + input, input + .row { margin-top: 14px; }
+.label b { font-variant-numeric: tabular-nums; }
+.hint { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: var(--accent); }
+
+.chips { display: flex; gap: 8px; margin-top: 12px; }
+.chip { flex: 1; border: 0; border-radius: 16px; padding: 10px 4px; background: var(--line); font-size: 12px; color: var(--muted); transition: background .15s, color .15s, transform .1s; }
+.chip b { display: block; font-size: 16px; color: var(--ink); }
+.chip:active { transform: scale(.96); }
+.chip.active { background: var(--accent); color: var(--accent-ink); }
+.chip.active b { color: var(--accent-ink); }
+
+.btn { display: block; width: 100%; border: 0; border-radius: 20px; padding: 17px; font-size: 17px; font-weight: 600; background: var(--accent); color: var(--accent-ink); transition: transform .1s, filter .15s, background .2s; }
+.btn:active { transform: scale(.98); filter: brightness(.95); }
+.btn.secondary { background: var(--line); color: var(--ink); }
+.btn:disabled { opacity: .6; }
+
+/* iOS-style switch */
+.switch { position: relative; width: 50px; height: 30px; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: .2s; }
+.switch span::before { content: ""; position: absolute; width: 24px; height: 24px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::before { transform: translateX(20px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Developer panel */
+.devtoggle { margin: 20px 6px 10px; }
+#dev[hidden] { display: none; }
+#dev input[type=text] { font: inherit; font-family: ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 130px; }
+#dev .chip { color: var(--ink); font-size: 13px; }
+#log { white-space: pre-wrap; word-break: break-all; font: 11px/1.45 ui-monospace, monospace; max-height: 280px; overflow: auto; background: var(--line); border-radius: 12px; padding: 8px 10px; margin-top: 12px; }
+#log:empty::before { content: "No messages yet"; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Ember 🔥</h1>
+    <div class="pills">
+      <span class="pill" id="batt">🔋 –</span>
+      <span class="pill" id="conn">Offline</span>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="ring" id="ring">
+      <svg width="220" height="220" viewBox="0 0 220 220" aria-hidden="true">
+        <circle class="track" cx="110" cy="110" r="96" fill="none" stroke-width="14"/>
+        <circle class="arc" id="arc" cx="110" cy="110" r="96" fill="none" stroke-width="14"
+                stroke-linecap="round" stroke-dasharray="603" stroke-dashoffset="603"/>
+      </svg>
+      <div class="c">
+        <div class="big" id="live">–</div>
+        <div class="sub">target <span id="tgt">–</span>°F</div>
+      </div>
+    </div>
+    <div class="state" id="state" aria-live="polite">Not connected</div>
+  </div>
+
+  <div class="card controls">
+    <div class="row label"><span>Temperature</span><b><span id="setv">380</span>°F</b></div>
+    <input type="range" id="temp" min="341" max="420" value="380" aria-label="Temperature">
+    <div class="chips" id="presets">
+      <button class="chip" data-t="360"><b>360°</b>Flavor</button>
+      <button class="chip" data-t="380"><b>380°</b>Balanced</button>
+      <button class="chip" data-t="400"><b>400°</b>Cloudy</button>
+      <button class="chip" data-t="420"><b>420°</b>Max</button>
+    </div>
+  </div>
+
+  <div class="card controls">
+    <label class="row">
+      <span>Hold temp between draws<span class="hint">Off = battery-saving cool-down &amp; sleep</span></span>
+      <span class="switch"><input type="checkbox" id="hold"><span></span></span>
+    </label>
+    <div class="row"><span>LED brightness</span></div>
+    <input type="range" id="bright" min="0" max="100" value="100" aria-label="LED brightness">
+  </div>
+
+  <button class="btn" id="connect">Connect</button>
+
+  <label class="row devtoggle">
+    <span class="hint">Developer mode</span>
+    <span class="switch"><input type="checkbox" id="devmode"><span></span></span>
+  </label>
+
+  <div class="card" id="dev" hidden>
+    <div class="row">
+      <span>Serial<span class="hint">8 characters, on the device</span></span>
+      <input type="text" id="serial" maxlength="8" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="chips">
+      <button class="chip" id="status">Request status</button>
+      <button class="chip" id="clear">Clear log</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+</div>
+<script>
+const SERIAL = ''; // your 8-character serial, or leave blank and set it in Developer mode
+
+// ---- PAX 3 protocol ----
+const SVC      = '8e320200-64d2-11e6-bdf4-0800200c9a66';
+const C_READ   = '8e320201-64d2-11e6-bdf4-0800200c9a66';
+const C_WRITE  = '8e320202-64d2-11e6-bdf4-0800200c9a66';
+const C_NOTIFY = '8e320203-64d2-11e6-bdf4-0800200c9a66';
+const MASTER   = hex('F7C866C38F78753086293BD57DD32540');
+const BITS     = [1, 2, 3, 6, 7, 9, 13, 15, 17, 19, 20, 21, 23, 27, 28, 31, 32];
+const PROFILE  = [1600, 30, 150, 20, 30, 180, 39, 2300, 1990, 20];
+const STATES = {
+  0: ['Heating up…', 'heat'],
+  1: ['Ready ✨', 'ok'],
+  2: ['Drawing', 'heat'],
+  3: ['Cooling down', 'cool'],
+  4: ['Sleeping 💤', 'cool'],
+  5: ['Oven off', 'cool'],
+  6: ['Setting temp', 'heat'],
+};
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+let keyObj, device, rd, wr;
+let chain = Promise.resolve();
+let want = false, retries = 0, dragging = false;
+let live = null, target = null;
+const lines = [];
+
+// ---- Helpers ----
+function hex(s) { return new Uint8Array(s.match(/../g).map(h => parseInt(h, 16))); }
+function toHex(b) { return [...b].map(x => x.toString(16).padStart(2, '0')).join(' '); }
+
+function renderLog() {
+  if (!$('devmode').checked) return;
+  $('log').textContent = lines.join('\n');
+  $('log').scrollTop = 1e9;
+}
+function log(m) {
+  lines.push(new Date().toLocaleTimeString() + '  ' + m);
+  if (lines.length > 300) lines.shift();
+  renderLog();
+}
+
+// Queue work so BLE reads/writes never overlap; a failure never jams the queue.
+function enqueue(fn) {
+  chain = chain.then(fn).catch(e => log('error: ' + e));
+}
+
+// ---- Crypto (AES-128-OFB keyed by serial) ----
+const importKey = raw => crypto.subtle.importKey('raw', raw, 'AES-CBC', false, ['encrypt']);
+async function aesBlock(k, b) {
+  return new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CBC', iv: new Uint8Array(16) }, k, b)).slice(0, 16);
+}
+async function deriveKey(s) {
+  return aesBlock(await importKey(MASTER), new TextEncoder().encode(s + s));
+}
+async function ofb(data, iv) {
+  const out = new Uint8Array(data.length);
+  let fb = iv;
+  for (let i = 0; i < data.length; i += 16) {
+    fb = await aesBlock(keyObj, fb);
+    for (let j = 0; j < 16 && i + j < data.length; j++) out[i + j] = data[i + j] ^ fb[j];
+  }
+  return out;
+}
+
+// ---- Encoding ----
+const rawToF = r => r < 1986 ? Math.floor(r * 6 / 37) + 38 : Math.floor(r / 6) + 29;
+const fToRaw = f => f < 360 ? Math.ceil((f - 38) * 37 / 6) : (f - 29) * 6;
+function u64(bits) {
+  let v = 0n;
+  for (const b of bits) v |= 1n << BigInt(b);
+  const a = new Uint8Array(8);
+  new DataView(a.buffer).setBigUint64(0, v, true);
+  return [...a];
+}
+function i32(v) {
+  const a = new Uint8Array(4);
+  new DataView(a.buffer).setInt32(0, v, true);
+  return [...a];
+}
+function u16s(vals) {
+  const a = new Uint8Array(vals.length * 2), d = new DataView(a.buffer);
+  vals.forEach((v, i) => d.setUint16(i * 2, v, true));
+  return [...a];
+}
+
+// ---- UI ----
+function setConn(text, on) {
+  $('conn').textContent = text;
+  $('conn').classList.toggle('on', !!on);
+  document.body.classList.toggle('connected', !!on);
+  $('connect').textContent = on ? 'Disconnect' : 'Connect';
+  $('connect').classList.toggle('secondary', !!on);
+}
+function setState(t) {
+  const s = $('state');
+  if (s.textContent === t) return;
+  s.style.opacity = 0;
+  setTimeout(() => { s.textContent = t; s.style.opacity = 1; }, 150);
+}
+function drawRing() {
+  $('live').innerHTML = live == null ? '–' : `${live}<small>°</small>`;
+  $('tgt').textContent = target ?? '–';
+  const frac = live && target ? Math.min(1, Math.max(0, (live - 150) / (target - 150))) : 0;
+  $('arc').style.strokeDashoffset = 603 * (1 - frac);
+}
+function showSetTemp(f) {
+  $('temp').value = f;
+  $('setv').textContent = f;
+  document.querySelectorAll('#presets .chip').forEach(c => c.classList.toggle('active', +c.dataset.t === +f));
+}
+function showDev() {
+  $('dev').hidden = !$('devmode').checked;
+  renderLog();
+}
+
+// ---- Device I/O ----
+function handle(pt) {
+  const id = pt[0], dv = new DataView(pt.buffer, pt.byteOffset), u16 = () => dv.getUint16(1, true);
+  if (id === 1) { live = rawToF(u16()); drawRing(); return; }
+  log(`← ${id} [${toHex(pt.slice(1, 9))}]`);
+  if (id === 2 && !dragging) showSetTemp(rawToF(u16()));
+  if (id === 31) { target = rawToF(u16()); drawRing(); }
+  if (id === 3) $('batt').textContent = '🔋 ' + pt[1] + '%';
+  if (id === 21 && pt[1] >= 5) $('bright').value = Math.round((pt[1] - 5) * 100 / 123);
+  if (id === 32) {
+    const [text, cls] = STATES[pt[1]] || ['State ' + pt[1], 'cool'];
+    setState(text);
+    $('ring').className = 'ring ' + cls;
+  }
+}
+function onNotify() {
+  enqueue(async () => {
+    if (!rd) return;
+    const v = new Uint8Array((await rd.readValue()).buffer);
+    handle(await ofb(v.slice(0, -16), v.slice(-16)));
+  });
+}
+function writePkt(p) {
+  if (wr.properties.writeWithoutResponse && wr.writeValueWithoutResponse) return wr.writeValueWithoutResponse(p);
+  if (wr.writeValueWithResponse) return wr.writeValueWithResponse(p);
+  return wr.writeValue(p);
+}
+function send(id, payload = []) {
+  enqueue(async () => {
+    if (!wr) return;
+    const len = Math.ceil((1 + payload.length) / 16) * 16;
+    const pt = crypto.getRandomValues(new Uint8Array(len));
+    pt[0] = id;
+    pt.set(payload, 1);
+    const iv = crypto.getRandomValues(new Uint8Array(16));
+    const pkt = new Uint8Array(len + 16);
+    pkt.set(await ofb(pt, iv));
+    pkt.set(iv, len);
+    try { await writePkt(pkt); log(`→ ${id} [${toHex(payload)}] ok`); }
+    catch (e) { log(`→ ${id} FAILED ${e}`); }
+  });
+}
+function applyMode() {
+  send(19, [0]);
+  send(25, u16s([...PROFILE, $('hold').checked ? 57 : 63]));
+  send(21, [0, 2]);
+}
+function setTemp(f) {
+  showSetTemp(f);
+  send(2, i32(fToRaw(f)));
+  send(254, u64([2, 31]));
+}
+
+// ---- Connection ----
+async function connect() {
+  const s = ($('serial').value || SERIAL).trim().toUpperCase();
+  if (s.length !== 8) {
+    $('devmode').checked = true;
+    showDev();
+    $('serial').focus();
+    log('Enter your 8-character serial first');
+    setState('Enter your serial in Developer mode');
+    return;
+  }
+  keyObj = await importKey(await deriveKey(s));
+  if (!device) {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    device.addEventListener('gattserverdisconnected', onDisc);
+  }
+  want = true;
+  setConn('Connecting…');
+  setState('Connecting…');
+  const svc = await (await device.gatt.connect()).getPrimaryService(SVC);
+  rd = await svc.getCharacteristic(C_READ);
+  wr = await svc.getCharacteristic(C_WRITE);
+  const nt = await svc.getCharacteristic(C_NOTIFY);
+  nt.oncharacteristicvaluechanged = onNotify;
+  await nt.startNotifications();
+  chain = Promise.resolve();
+  retries = 0;
+  setConn('Connected', true);
+  log(`Connected to ${device.name} (writeWithoutResponse=${wr.properties.writeWithoutResponse})`);
+  applyMode();
+  send(254, u64(BITS));
+}
+function onDisc() {
+  rd = wr = null;
+  if (want && retries < 5) {
+    retries++;
+    setConn('Reconnecting…');
+    log('Link dropped, retry ' + retries);
+    setTimeout(() => connect().catch(e => { log('Retry failed: ' + e); onDisc(); }), 800 * retries);
+  } else {
+    $('ring').className = 'ring';
+    setConn('Offline');
+    setState(want ? 'Lost connection — tap Connect' : 'Not connected');
+    want = false;
+  }
+}
+
+// ---- Wiring ----
+$('connect').onclick = () => {
+  if (wr) { want = false; device.gatt.disconnect(); return; }
+  connect().catch(e => {
+    want = false;
+    log('Connect error: ' + e);
+    setConn('Offline');
+    setState(e.name === 'NotFoundError' ? 'Not connected' : 'Couldn’t connect — try again');
+  });
+};
+$('temp').oninput = e => { dragging = true; showSetTemp(e.target.value); };
+$('temp').onchange = e => { dragging = false; setTemp(+e.target.value); };
+document.querySelectorAll('#presets .chip').forEach(b => b.onclick = () => setTemp(+b.dataset.t));
+$('bright').onchange = e => send(21, [Math.round(5 + e.target.value * 123 / 100), 0]);
+$('hold').checked = store.get('paxHold') !== '0';
+$('hold').onchange = () => { store.set('paxHold', $('hold').checked ? '1' : '0'); applyMode(); };
+$('devmode').onchange = showDev;
+$('status').onclick = () => send(254, u64(BITS));
+$('clear').onclick = () => { lines.length = 0; renderLog(); };
+$('serial').value = store.get('paxSerial') || SERIAL;
+$('serial').oninput = e => store.set('paxSerial', e.target.value.trim().toUpperCase());
+
+showSetTemp($('temp').value);
+if (!navigator.bluetooth) {
+  $('state').textContent = 'No Bluetooth here — on iPhone, use the Bluefy browser';
+  $('connect').disabled = true;
+} else if (!window.crypto?.subtle) {
+  $('state').textContent = 'Open this over https or localhost';
+  $('connect').disabled = true;
+}
+</script>
+</body>
+</html>
