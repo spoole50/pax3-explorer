@@ -604,7 +604,10 @@ function onNotify() {
 }
 // With response, like the official app: it paces writes, and some stacks (Mac/Windows/Linux Chrome)
 // drop the link on unacknowledged writes to this characteristic.
+// Some stacks (Bluefy/iOS) reject every acknowledged write, so after the first failure we stay unacknowledged.
+let noAck = false;
 function writePkt(p) {
+  if (noAck) return wr.writeValueWithoutResponse(p);
   return wr.writeValueWithResponse ? wr.writeValueWithResponse(p) : wr.writeValue(p);
 }
 function send(id, payload = [], quiet = false) {
@@ -620,10 +623,11 @@ function send(id, payload = [], quiet = false) {
     pkt.set(iv, len);
     try { await writePkt(pkt); if (!quiet) log(`→ ${id} [${toHex(payload)}] ok`); }
     catch (e) {
-      // The device sometimes starts rejecting acknowledged writes mid-session; retry unacknowledged.
-      if (!wr?.properties.writeWithoutResponse || !wr.writeValueWithoutResponse) return log(`→ ${id} FAILED ${e}`);
-      try { await wr.writeValueWithoutResponse(pkt); log(`→ ${id} [${toHex(payload)}] ok (no-response fallback after: ${e.message})`); }
-      catch (e2) { log(`→ ${id} FAILED ${e} / fallback: ${e2}`); }
+      if (noAck || !wr?.properties.writeWithoutResponse || !wr.writeValueWithoutResponse) return log(`→ ${id} FAILED ${e}`);
+      noAck = true;
+      log(`Acknowledged write rejected (${e.message}); switching to write-without-response`);
+      try { await wr.writeValueWithoutResponse(pkt); if (!quiet) log(`→ ${id} [${toHex(payload)}] ok`); }
+      catch (e2) { log(`→ ${id} FAILED ${e2}`); }
     }
   });
 }
@@ -681,6 +685,7 @@ async function connect() {
   nt.oncharacteristicvaluechanged = onNotify;
   await nt.startNotifications();
   chain = Promise.resolve();
+  noAck = false;
   retries = 0;
   setConn('Connected', true);
   log(`Connected to ${device.name}`);
