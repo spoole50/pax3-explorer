@@ -98,6 +98,7 @@ input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: va
 .chip:active { transform: scale(.96); }
 .chip.active { background: var(--accent); color: var(--accent-ink); }
 .chip.active b { color: var(--accent-ink); }
+.swatch { display: block; width: 22px; height: 22px; margin: 0 auto 4px; border-radius: 50%; box-shadow: 0 0 0 1px var(--line); }
 
 .btn { display: block; width: 100%; border: 0; border-radius: 20px; padding: 17px; font-size: 17px; font-weight: 600; background: var(--accent); color: var(--accent-ink); transition: transform .1s, filter .15s, background .2s; }
 .btn:active { transform: scale(.98); filter: brightness(.95); }
@@ -203,6 +204,8 @@ input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: va
     </label>
     <div class="row"><span>LED brightness</span></div>
     <input type="range" id="bright" min="0" max="100" value="100" aria-label="LED brightness">
+    <div class="row"><span>LED colors</span></div>
+    <div class="chips" id="themes"></div>
   </div>
 
   <button class="btn" id="connect">Connect</button>
@@ -266,10 +269,18 @@ const STATES = {
 const ATTRS = {
   1: ['Live temp'], 2: ['Set point'], 3: ['Battery'], 4: ['Usage', true], 6: ['Locked'],
   7: ['Charge status'], 8: ['Pod inserted', true], 9: ['Uptime'], 17: ['Temp levels'],
-  19: ['Dynamic mode'], 20: ['Color theme', true], 21: ['Brightness'], 23: ['Haptic mode', true],
-  24: ['Supported attributes'], 25: ['Heating params'], 27: ['UI mode', true], 28: ['Shell color', true],
+  19: ['Dynamic mode'], 20: ['Color theme'], 21: ['Brightness'], 23: ['Haptic mode', true],
+  24: ['Supported attributes'], 25: ['Heating params'], 27: ['UI mode'], 28: ['Shell color', true],
   30: ['Low battery mode', true], 31: ['Active target'], 32: ['Heating state'],
 };
+// Official app color themes (via github.com/290asd/pax3-web). Each is 4 states (startup, heating,
+// regulating, standby) of 8 bytes: r1 g1 b1 r2 g2 b2 animation frequency. null = stock LEDs (UI mode 0).
+const THEMES = [
+  ['Default', null],
+  ['Ocean',  '0000ff006c750011 1307282800ff0010 245c430000ff0209 0014140000ff0106'],
+  ['Sunset', 'ff73289900680105 ff7328990068000f fd9528990088020b ff727d00409a0106'],
+  ['Mars',   'fa00003c1400021b ff00000302010011 ff16030302010209 fa1e0a040f0c0107'],
+].map(([name, h]) => [name, h && hex(h.replace(/ /g, ''))]);
 const DEFAULT_PRESETS = [360, 380, 400, 420];
 const fmtTime = ms => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -577,6 +588,7 @@ function handle(pt) {
   if (id === 31) { target = rawToF(u16()); drawRing(); }
   if (id === 3) { battery = pt[1]; renderBattery(); }
   if (id === 7) { charging = pt[1] !== 0; renderBattery(); showState(); } // 01 = on charger (tested)
+  if (id === 20 || id === 27) showTheme();
   if (id === 21 && pt[1] >= 5) $('bright').value = Math.round((pt[1] - 5) * 100 / 123);
   if (id === 32) {
     trackState(pt[1]);
@@ -609,6 +621,23 @@ function send(id, payload = [], quiet = false) {
     try { await writePkt(pkt); if (!quiet) log(`→ ${id} [${toHex(payload)}] ok`); }
     catch (e) { log(`→ ${id} FAILED ${e}`); }
   });
+}
+function renderThemes() {
+  $('themes').innerHTML = THEMES.map(([name, b], i) => {
+    const c = b ? `linear-gradient(rgb(${b[16]},${b[17]},${b[18]}), rgb(${b[19]},${b[20]},${b[21]}))` : 'conic-gradient(#f44, #fd4, #4d6, #4af, #a6f, #f44)';
+    return `<button class="chip" data-i="${i}"><span class="swatch" style="background:${c}"></span>${name}</button>`;
+  }).join('');
+  $('themes').querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    const b = THEMES[c.dataset.i][1];
+    if (b) send(20, [4, ...b]); else send(27, [0]);
+    send(254, u64([20, 27])); // read back so the highlight reflects what the device accepted
+  });
+}
+// Highlight the preset matching the device's current UI mode + theme (none if it's a custom theme).
+function showTheme() {
+  const mode = attrs[27]?.bytes[0], cur = attrs[20] && toHex(attrs[20].bytes.slice(1, 33));
+  const i = mode === 0 ? 0 : mode === 1 && cur ? THEMES.findIndex(([, b]) => b && toHex(b) === cur) : -1;
+  $('themes').querySelectorAll('.chip').forEach(c => c.classList.toggle('active', +c.dataset.i === i));
 }
 function applyMode() {
   send(19, [0]);
@@ -704,6 +733,7 @@ $('serial').oninput = e => store.set('paxSerial', e.target.value.trim().toUpperC
 
 $('poll').checked = false; // browsers can restore checkbox state on reload without firing onchange
 renderPresets();
+renderThemes();
 if (!navigator.bluetooth) {
   $('state').textContent = 'No Bluetooth here — on iPhone, use the Bluefy browser';
   $('connect').disabled = true;
