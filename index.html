@@ -678,12 +678,23 @@ async function connect() {
   want = true;
   setConn('Connecting…');
   setState('Connecting…');
-  const svc = await (await device.gatt.connect()).getPrimaryService(SVC);
+  // Each GATT step can hang forever on a stale link, so log it and give up after 15s.
+  const step = (name, p) => {
+    log(name + '…', true);
+    let t;
+    return Promise.race([p, new Promise((_, no) => t = setTimeout(() => {
+      want = false;
+      device.gatt.disconnect();
+      no(new Error(name + ' timed out (PAX may still be connected elsewhere)'));
+    }, 15000))]).finally(() => clearTimeout(t));
+  };
+  const gatt = await step('Opening link', device.gatt.connect());
+  const svc = await step('Getting service', gatt.getPrimaryService(SVC));
   rd = await svc.getCharacteristic(C_READ);
   wr = await svc.getCharacteristic(C_WRITE);
   const nt = await svc.getCharacteristic(C_NOTIFY);
   nt.oncharacteristicvaluechanged = onNotify;
-  await nt.startNotifications();
+  await step('Starting notifications', nt.startNotifications());
   chain = Promise.resolve();
   noAck = false;
   retries = 0;
