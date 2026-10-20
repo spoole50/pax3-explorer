@@ -203,6 +203,12 @@ input[type=range] { width: 100%; height: 32px; margin: 6px 0 0; accent-color: va
     </label>
     <div class="row"><span>LED brightness</span></div>
     <input type="range" id="bright" min="0" max="100" value="100" aria-label="LED brightness">
+    <div class="row label"><span>Color theme<span class="hint">Experimental: switches the LED theme</span></span></div>
+    <div class="chips" id="themes">
+      <button class="chip" data-v="0"><b>1</b>Theme</button>
+      <button class="chip" data-v="1"><b>2</b>Theme</button>
+      <button class="chip" data-v="2"><b>3</b>Theme</button>
+    </div>
   </div>
 
   <button class="btn" id="connect">Connect</button>
@@ -577,6 +583,7 @@ function handle(pt) {
   if (id === 31) { target = rawToF(u16()); drawRing(); }
   if (id === 3) { battery = pt[1]; renderBattery(); }
   if (id === 7) { charging = pt[1] !== 0; renderBattery(); showState(); } // 01 = on charger (tested)
+  if (id === 20) showTheme(pt[1]);
   if (id === 21 && pt[1] >= 5) $('bright').value = Math.round((pt[1] - 5) * 100 / 123);
   if (id === 32) {
     trackState(pt[1]);
@@ -609,6 +616,9 @@ function send(id, payload = [], quiet = false) {
     try { await writePkt(pkt); if (!quiet) log(`→ ${id} [${toHex(payload)}] ok`); }
     catch (e) { log(`→ ${id} FAILED ${e}`); }
   });
+}
+function showTheme(v) {
+  document.querySelectorAll('#themes .chip').forEach(c => c.classList.toggle('active', +c.dataset.v === v));
 }
 function applyMode() {
   send(19, [0]);
@@ -684,6 +694,10 @@ $('temp').oninput = e => { dragging = true; showSetTemp(e.target.value); };
 $('temp').onchange = e => { dragging = false; setTemp(+e.target.value); };
 document.querySelectorAll('#presets .chip').forEach(wirePreset);
 $('bright').onchange = e => send(21, [Math.round(5 + e.target.value * 123 / 100), 0]);
+document.querySelectorAll('#themes .chip').forEach(c => c.onclick = () => {
+  send(20, [+c.dataset.v]);
+  send(254, u64([20])); // read back so the chip reflects what the device accepted
+});
 $('hold').checked = store.get('paxHold') !== '0';
 $('hold').onchange = () => { store.set('paxHold', $('hold').checked ? '1' : '0'); applyMode(); };
 $('devmode').onchange = showDev;
