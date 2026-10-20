@@ -608,10 +608,10 @@ function onNotify() {
     handle(await ofb(v.slice(0, -16), v.slice(-16)));
   });
 }
-// With response, like the official app: it paces writes, and some stacks (Mac/Windows/Linux Chrome)
-// drop the link on unacknowledged writes to this characteristic.
-// Some stacks (Bluefy/iOS) reject every acknowledged write, so after the first failure we stay unacknowledged.
-let noAck = false;
+// Write with response, like the official app: some stacks (Mac Chrome) drop the link on unacknowledged
+// writes. Others (Bluefy/iOS) reject every acknowledged write, so after the first rejection this browser
+// switches to unacknowledged writes for good.
+let noAck = store.get('paxNoAck') === '1';
 function writePkt(p) {
   if (noAck) return wr.writeValueWithoutResponse(p);
   return wr.writeValueWithResponse ? wr.writeValueWithResponse(p) : wr.writeValue(p);
@@ -631,6 +631,7 @@ function send(id, payload = [], quiet = false) {
     catch (e) {
       if (noAck || !wr?.properties.writeWithoutResponse || !wr.writeValueWithoutResponse) return log(`→ ${id} FAILED ${e}`);
       noAck = true;
+      store.set('paxNoAck', '1');
       log(`Acknowledged write rejected (${e.message}); switching to write-without-response`);
       try { await wr.writeValueWithoutResponse(pkt); if (!quiet) log(`→ ${id} [${toHex(payload)}] ok`); }
       catch (e2) { log(`→ ${id} FAILED ${e2}`); }
@@ -666,7 +667,13 @@ function setTemp(f) {
 }
 
 // ---- Connection ----
+let connecting = false, retryTimer = null;
 async function connect() {
+  if (connecting) return;
+  connecting = true;
+  try { await openLink(); } finally { connecting = false; }
+}
+async function openLink() {
   const s = ($('serial').value || SERIAL).trim().toUpperCase();
   if (s.length !== 8) {
     $('devmode').checked = true;
@@ -702,7 +709,7 @@ async function connect() {
   nt.oncharacteristicvaluechanged = onNotify;
   await step('Starting notifications', nt.startNotifications());
   chain = Promise.resolve();
-  readQueued = noAck = false;
+  readQueued = false;
   retries = 0;
   setConn('Connected', true);
   log(`Connected to ${device.name}`);
@@ -715,7 +722,7 @@ function onDisc() {
     retries++;
     setConn('Reconnecting…');
     log('Link dropped, retry ' + retries);
-    setTimeout(() => connect().catch(e => { log('Retry failed: ' + e); onDisc(); }), 800 * retries);
+    retryTimer = setTimeout(() => connect().catch(e => { log('Retry failed: ' + e); onDisc(); }), 800 * retries);
   } else {
     $('ring').className = 'ring';
     endSession();
@@ -729,6 +736,7 @@ function onDisc() {
 // ---- Wiring ----
 $('connect').onclick = () => {
   if (wr) { want = false; device.gatt.disconnect(); return; }
+  clearTimeout(retryTimer);
   connect().catch(e => {
     want = false;
     log('Connect error: ' + e);
@@ -739,7 +747,10 @@ $('connect').onclick = () => {
 $('temp').oninput = e => { dragging = true; showSetTemp(e.target.value); };
 $('temp').onchange = e => { dragging = false; setTemp(+e.target.value); };
 document.querySelectorAll('#presets .chip').forEach(wirePreset);
-$('bright').onchange = e => send(21, [Math.round(5 + e.target.value * 123 / 100), 0]);
+$('bright').onchange = e => {
+  send(21, [Math.round(5 + e.target.value * 123 / 100), 0]);
+  send(254, u64([21])); // read back so the slider reflects what the device accepted
+};
 $('hold').checked = store.get('paxHold') !== '0';
 $('hold').onchange = () => { store.set('paxHold', $('hold').checked ? '1' : '0'); applyMode(); };
 $('devmode').onchange = showDev;
