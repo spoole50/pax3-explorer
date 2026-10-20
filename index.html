@@ -619,7 +619,12 @@ function send(id, payload = [], quiet = false) {
     pkt.set(await ofb(pt, iv));
     pkt.set(iv, len);
     try { await writePkt(pkt); if (!quiet) log(`→ ${id} [${toHex(payload)}] ok`); }
-    catch (e) { log(`→ ${id} FAILED ${e}`); }
+    catch (e) {
+      // The device sometimes starts rejecting acknowledged writes mid-session; retry unacknowledged.
+      if (!wr?.properties.writeWithoutResponse || !wr.writeValueWithoutResponse) return log(`→ ${id} FAILED ${e}`);
+      try { await wr.writeValueWithoutResponse(pkt); log(`→ ${id} [${toHex(payload)}] ok (no-response fallback after: ${e.message})`); }
+      catch (e2) { log(`→ ${id} FAILED ${e} / fallback: ${e2}`); }
+    }
   });
 }
 function renderThemes() {
