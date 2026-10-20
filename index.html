@@ -602,10 +602,10 @@ function onNotify() {
     handle(await ofb(v.slice(0, -16), v.slice(-16)));
   });
 }
+// With response, like the official app: it paces writes, and some stacks (Mac/Windows/Linux Chrome)
+// drop the link on unacknowledged writes to this characteristic.
 function writePkt(p) {
-  if (wr.properties.writeWithoutResponse && wr.writeValueWithoutResponse) return wr.writeValueWithoutResponse(p);
-  if (wr.writeValueWithResponse) return wr.writeValueWithResponse(p);
-  return wr.writeValue(p);
+  return wr.writeValueWithResponse ? wr.writeValueWithResponse(p) : wr.writeValue(p);
 }
 function send(id, payload = [], quiet = false) {
   enqueue(async () => {
@@ -678,7 +678,7 @@ async function connect() {
   chain = Promise.resolve();
   retries = 0;
   setConn('Connected', true);
-  log(`Connected to ${device.name} (writeWithoutResponse=${wr.properties.writeWithoutResponse})`);
+  log(`Connected to ${device.name}`);
   applyMode();
   send(254, u64(BITS));
 }
