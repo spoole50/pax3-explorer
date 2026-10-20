@@ -595,8 +595,14 @@ function handle(pt) {
     showState();
   }
 }
+// A read returns the device's latest value, so one queued read covers any burst of notifications
+// (e.g. temp flickering while drawing) instead of flooding the link with reads.
+let readQueued = false;
 function onNotify() {
+  if (readQueued) return;
+  readQueued = true;
   enqueue(async () => {
+    readQueued = false;
     if (!rd) return;
     const v = new Uint8Array((await rd.readValue()).buffer);
     handle(await ofb(v.slice(0, -16), v.slice(-16)));
@@ -696,7 +702,7 @@ async function connect() {
   nt.oncharacteristicvaluechanged = onNotify;
   await step('Starting notifications', nt.startNotifications());
   chain = Promise.resolve();
-  noAck = false;
+  readQueued = noAck = false;
   retries = 0;
   setConn('Connected', true);
   log(`Connected to ${device.name}`);
