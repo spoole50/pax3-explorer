@@ -559,6 +559,14 @@ function renderPollStatus() {
 }
 setInterval(renderPollStatus, 1000);
 
+function showState() {
+  if (heatState == null) return;
+  const [text, cls] = STATES[heatState] || ['State ' + heatState, 'cool'];
+  // Plugging in turns the oven off, so say why
+  setState(charging && heatState === 5 ? 'Charging ⚡' : text);
+  $('ring').className = 'ring ' + cls;
+}
+
 // ---- Device I/O ----
 function handle(pt) {
   const id = pt[0], dv = new DataView(pt.buffer, pt.byteOffset), u16 = () => dv.getUint16(1, true);
@@ -568,13 +576,11 @@ function handle(pt) {
   if (id === 2 && !dragging) showSetTemp(rawToF(u16()));
   if (id === 31) { target = rawToF(u16()); drawRing(); }
   if (id === 3) { battery = pt[1]; renderBattery(); }
-  if (id === 7) { charging = pt[1] !== 0; renderBattery(); } // assumes 0 = not charging
+  if (id === 7) { charging = pt[1] !== 0; renderBattery(); showState(); } // 01 = on charger (tested)
   if (id === 21 && pt[1] >= 5) $('bright').value = Math.round((pt[1] - 5) * 100 / 123);
   if (id === 32) {
-    const [text, cls] = STATES[pt[1]] || ['State ' + pt[1], 'cool'];
-    setState(text);
-    $('ring').className = 'ring ' + cls;
     trackState(pt[1]);
+    showState();
   }
 }
 function onNotify() {
