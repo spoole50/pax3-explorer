@@ -502,7 +502,11 @@ function decodeAttr(id, b) {
 function attrHex(a) {
   let last = a.bytes.length - 1;
   while (last > 0 && isNoise(a, last)) last--;
-  const shown = a.bytes.slice(0, last + 1).map((x, i) => isNoise(a, i) ? '··' : x.toString(16).padStart(2, '0')).join(' ');
+  let zeros = 0; // collapse a long run of trailing 00s
+  while (zeros <= last && a.bytes[last - zeros] === 0 && !isNoise(a, last - zeros)) zeros++;
+  const keep = zeros > 4 ? last - zeros + 1 : last + 1;
+  let shown = a.bytes.slice(0, keep).map((x, i) => isNoise(a, i) ? '··' : x.toString(16).padStart(2, '0')).join(' ');
+  if (keep <= last) shown += ` 00×${zeros}`;
   return last < a.bytes.length - 1 ? shown + ' …' : shown;
 }
 function renderAttrs() {
@@ -532,12 +536,17 @@ setInterval(renderAttrs, 1000);
 function syncPoll() {
   const on = $('poll').checked && !$('dev').hidden;
   if (on && !pollTimer) {
-    pollTimer = setInterval(() => send(254, u64(BITS), true), 2000);
+    pollTimer = setInterval(() => send(254, u64(pollIds()), true), 2000);
     pollStats.replies = pollStats.changes = 0;
     log('Live poll on: only changes are logged; silence means nothing changed', true);
   }
   if (!on && pollTimer) { clearInterval(pollTimer); pollTimer = null; log('Live poll off', true); }
   renderPollStatus();
+}
+// Poll everything the device says it supports (attribute 24), not just the IDs the UI uses.
+function pollIds() {
+  const sup = attrs[24] && decodeAttr(24, attrs[24].bytes).slice(4).split(', ').map(Number);
+  return sup?.length ? sup.filter(id => id !== 1) : [...BITS, 24, 26, 30];
 }
 function renderPollStatus() {
   const el = $('pollStatus');
